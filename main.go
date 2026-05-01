@@ -13,6 +13,19 @@ func isValidYouTubeURL(url string) bool {
 	return strings.Contains(url, "youtube.com") || strings.Contains(url, "youtu.be")
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	url := r.URL.Query().Get("url")
 	format := r.URL.Query().Get("type")
@@ -77,7 +90,7 @@ func rateLimit(next http.Handler) http.Handler {
 
 func main() {
 	mux := http.NewServeMux()
-	mux.Handle("/download", rateLimit(http.HandlerFunc(downloadHandler)))
+	mux.Handle("/download", corsMiddleware(rateLimit(http.HandlerFunc(downloadHandler))))
 
 	log.Println("Server running on :3000")
 	http.ListenAndServe(":3000", mux)
