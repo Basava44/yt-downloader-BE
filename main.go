@@ -1,10 +1,11 @@
 package main
 
 import (
-	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -35,39 +36,47 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tmpDir, err := os.MkdirTemp("", "ytdl-")
+	if err != nil {
+		http.Error(w, "Server error", 500)
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
 	var args []string
-	var filename string
+	var outName string
 
 	if format == "mp3" {
-		args = []string{"-x", "--audio-format", "mp3", "-o", "-", url}
-		filename = "audio.mp3"
+		outName = "audio.mp3"
+		args = []string{
+			"-x", "--audio-format", "mp3",
+			"-o", filepath.Join(tmpDir, outName),
+			url,
+		}
 	} else {
-		args = []string{"-f", "mp4", "-o", "-", url}
-		filename = "video.mp4"
+		outName = "video.mp4"
+		args = []string{
+			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+			"--merge-output-format", "mp4",
+			"-o", filepath.Join(tmpDir, outName),
+			url,
+		}
 	}
 
 	cmd := exec.Command("yt-dlp", args...)
+	cmd.Stderr = os.Stderr
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		http.Error(w, "Error creating pipe", 500)
+	if err := cmd.Run(); err != nil {
+		log.Println("yt-dlp error:", err)
+		http.Error(w, "Download failed", 500)
 		return
 	}
 
-	if err := cmd.Start(); err != nil {
-		http.Error(w, "Error starting process", 500)
-		return
-	}
+	outPath := filepath.Join(tmpDir, outName)
 
-	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+	w.Header().Set("Content-Disposition", "attachment; filename="+outName)
 	w.Header().Set("Content-Type", "application/octet-stream")
-
-	_, err = io.Copy(w, stdout)
-	if err != nil {
-		log.Println("Stream error:", err)
-	}
-
-	cmd.Wait()
+	http.ServeFile(w, r, outPath)
 }
 
 func rateLimit(next http.Handler) http.Handler {
